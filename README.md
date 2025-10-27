@@ -28,7 +28,7 @@ pip install uv
 
 2. Clone o repositório:
 ```bash
-git clone <url-do-repositorio>
+git clone https://github.com/MaikeRob/RacoGraph.git
 cd RacoGraph
 ```
 
