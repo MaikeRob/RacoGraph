@@ -82,6 +82,16 @@ def build_graph():
     return graph_instance, movies_data, ratings_data
 
 
+def get_title_safe(g: Graph, movies_df: pd.DataFrame, movie_node_id: str) -> str:
+    """Tenta pegar o título via movies_df; se falhar, usa atributo do nó; senão retorna o próprio ID."""
+    try:
+        mid_int = int(movie_node_id[1:])
+        return movies_df.loc[movies_df["movieId"] == mid_int, "title"].iloc[0]
+    except Exception:
+        node = g.get_node(movie_node_id)
+        return (node.get("title") if node else None) or movie_node_id
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="RacoGraph – construir grafo e gerar recomendações (Item–Item ou User-based)."
@@ -93,6 +103,14 @@ def main():
     parser.add_argument("--min-co", type=int, default=3, help="Mínimo de usuários em comum (padrão: 3)")
     parser.add_argument("--topk", type=int, default=10, help="Quantidade de itens a listar (padrão: 10)")
     parser.add_argument("--no-summary", action="store_true", help="Não imprimir resumo do grafo")
+    # Patches anteriores
+    parser.add_argument("--min-user-rating", type=float, default=3.5,
+                        help="Nota mínima do usuário para pesar no score (padrão: 3.5)")
+    parser.add_argument("--k-similar", type=int, default=30,
+                        help="Qtd. de similares por item considerado (padrão: 30)")
+    # NOVO: filtro por gênero
+    parser.add_argument("--genre", type=str,
+                        help="Filtrar recomendações por gênero (ex: Action, Comedy, Drama)")
     args = parser.parse_args()
 
     g, movies_df, ratings_df = build_graph()
@@ -112,61 +130,84 @@ def main():
         if not sims:
             print("Nenhum similar encontrado. Tente reduzir --min-co (ex.: --min-co 1) ou usar --metric jaccard.")
         for m, s in sims:
-            try:
-                m_int = int(m[1:])
-                title = movies_df.loc[movies_df["movieId"] == m_int, "title"].iloc[0]
-            except Exception:
-                title = g.get_node(m).get("title", m)
+            title = get_title_safe(g, movies_df, m)
             print(f"{m:<8} {s:.4f} | {title}")
 
         if args.user_id is None:
             return
 
     # ==============================
-    # Recomendações para um usuário
+    # Recomendações para um usuário (com filtro por gênero)
     # ==============================
     recs = []
     if args.user_id is not None:
         uid = f"U{int(args.user_id)}"
         recs = recommend_for_user(
-            g, uid, k_similar=30, topn=args.topk,
-            metric=args.metric, min_co=args.min_co, min_user_rating=3.5
+            g, uid,
+            k_similar=args.k_similar,
+            topn=args.topk,
+            metric=args.metric,
+            min_co=args.min_co,
+            min_user_rating=args.min_user_rating
         )
+
+        # Aplica filtro por gênero se fornecido
+        if args.genre:
+            genre_name = args.genre.strip()
+            allowed_ids = set(
+                movies_df[movies_df["genres"].str.contains(genre_name, case=False, na=False)]["movieId"].tolist()
+            )
+            recs = [(mid, score) for mid, score in recs if int(mid[1:]) in allowed_ids]
+
         print(f"\nRecomendações para {uid}:")
         if not recs:
-            print("Sem recomendações. Tente diminuir --min-co (ex.: 1) ou usar --metric jaccard.")
-        for m, score in recs:
-            try:
-                m_int = int(m[1:])
-                title = movies_df.loc[movies_df["movieId"] == m_int, "title"].iloc[0]
-            except Exception:
-                title = g.get_node(m).get("title", m)
-            print(f"{m:<8} {score:.4f} | {title}")
+            # Fallback de populares (respeitando o gênero se informado)
+            print("Sem recomendações por similaridade. Populares como fallback:")
+            if args.genre:
+                genre_name = args.genre.strip()
+                pop_in_genre = (
+                    ratings_df[ratings_df["movieId"].isin(
+                        movies_df[movies_df["genres"].str.contains(genre_name, case=False, na=False)]["movieId"]
+                    )]["movieId"]
+                    .value_counts()
+                    .head(args.topk)
+                    .index.tolist()
+                )
+                popular_ids = pop_in_genre
+            else:
+                popular_ids = ratings_df["movieId"].value_counts().head(args.topk).index.tolist()
+
+            for mid_int in popular_ids:
+                mid = f"F{int(mid_int)}"
+                title = get_title_safe(g, movies_df, mid)
+                print(f"{mid:<8}  -   | {title}")
+        else:
+            for m, score in recs:
+                title = get_title_safe(g, movies_df, m)
+                print(f"{m:<8} {score:.4f} | {title}")
 
     # ==============================
-    # Salva recomendações em CSV
+    # Salva recomendações em CSV (apenas quando houver lista por similaridade)
     # ==============================
     if args.user_id is not None and recs:
         os.makedirs("outputs", exist_ok=True)
-        csv_path = os.path.join("outputs", f"recommendations_user{args.user_id}.csv")
+        suffix = f"_genre-{args.genre}" if args.genre else ""
+        csv_path = os.path.join("outputs", f"recommendations_user{args.user_id}{suffix}.csv")
 
         import csv
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["userId", "movieId", "title", "score", "metric", "timestamp"])
+            writer.writerow(["userId", "movieId", "title", "score", "metric", "timestamp", "genre_filter"])
             for mid, score in recs:
-                try:
-                    mid_int = int(mid[1:])
-                    title = movies_df.loc[movies_df["movieId"] == mid_int, "title"].iloc[0]
-                except Exception:
-                    title = g.get_node(mid).get("title", mid)
+                title = get_title_safe(g, movies_df, mid)
                 writer.writerow([
                     args.user_id,
                     mid,
                     title,
                     f"{score:.4f}",
                     args.metric,
-                    datetime.now().isoformat(timespec="seconds")
+                    datetime.now().isoformat(timespec="seconds"),
+                    args.genre or ""
                 ])
 
         print(f"\n📁 Recomendações salvas em: {csv_path}")
