@@ -1,0 +1,11 @@
+userId,movieId,title,score,metric,timestamp
+1,F2918,Ferris Bueller's Day Off (1986),110.2634,cosine,2025-11-08T16:08:30
+1,F2762,"Sixth Sense, The (1999)",70.3422,cosine,2025-11-08T16:08:30
+1,F589,Terminator 2: Judgment Day (1991),68.9144,cosine,2025-11-08T16:08:30
+1,F858,"Godfather, The (1972)",64.5540,cosine,2025-11-08T16:08:30
+1,F1527,"Fifth Element, The (1997)",62.7753,cosine,2025-11-08T16:08:30
+1,F1968,"Breakfast Club, The (1985)",58.2455,cosine,2025-11-08T16:08:30
+1,F1200,Aliens (1986),55.6647,cosine,2025-11-08T16:08:30
+1,F1036,Die Hard (1988),55.3274,cosine,2025-11-08T16:08:30
+1,F541,Blade Runner (1982),47.5983,cosine,2025-11-08T16:08:30
+1,F2683,Austin Powers: The Spy Who Shagged Me (1999),41.6235,cosine,2025-11-08T16:08:30
