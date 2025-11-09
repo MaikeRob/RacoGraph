@@ -13,4 +13,5 @@ dependencies = [
     "tzdata==2025.2",
     "matplotlib>=3.5.0",
     "networkx>=2.8.0",
+    "streamlit>=1.28.0",
 ]

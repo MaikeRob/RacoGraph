@@ -1,4 +1,24 @@
-import json
+"""
+Implementação de estrutura de grafo não-direcionado para o sistema de recomendação.
+Utiliza lista de adjacência para armazenar conexões entre nós.
+"""
+from typing import List, Dict, Any
+
+
+def is_user(node_id: str) -> bool:
+    """Verifica se o nó é um usuário (prefixo 'U')."""
+    return isinstance(node_id, str) and node_id.startswith("U")
+
+
+def is_movie(node_id: str) -> bool:
+    """Verifica se o nó é um filme (prefixo 'F')."""
+    return isinstance(node_id, str) and node_id.startswith("F")
+
+
+def is_genre(node_id: str) -> bool:
+    """Verifica se o nó é um gênero (prefixo 'G')."""
+    return isinstance(node_id, str) and node_id.startswith("G")
+
 
 class Graph:
     """
@@ -60,7 +80,7 @@ class Graph:
         self.adj[u_id].append(edge_uv)
         self.adj[v_id].append(edge_vu)
 
-    def get_neighbors(self, node_id):
+    def get_neighbors(self, node_id) -> List[Dict[str, Any]]:
         """
         Retorna a lista de vizinhos de um nó.
 
@@ -82,55 +102,16 @@ class Graph:
         """
         Define como o grafo será exibido ao usar `print(g)`.
         """
-        output = "Estrutura do Grafo:\n"
-        for node, attrs in self.nodes.items():
-            output += f"- Nó: {node} (Tipo: {attrs['type']})\n"
-            neighbors = self.get_neighbors(node)
-            if neighbors:
-                for edge in neighbors:
-                    output += f"  -> conecta com: {edge['node']} (Peso: {edge['weight']})\n"
-            else:
-                output += "  (sem conexões)\n"
-        return output
-
-# --- Exemplo de Uso ---
-if __name__ == "__main__":
-    # 1. Criar o grafo
-    g = Graph()
-
-    # 2. Adicionar nós
-    g.add_node('U1', node_type='User')
-    g.add_node('U2', node_type='User')
-    g.add_node('F1', node_type='Movie', title='Filme Exemplo 1')
-    g.add_node('F2', node_type='Movie', title='Filme Exemplo 2')
-    g.add_node('G1', node_type='Genre', name='Ação')
-    g.add_node('G2', node_type='Genre', name='Comédia')
-
-    # 3. Adicionar conexões (arestas)
-    
-    # U1 avaliou F1 com nota 5.0
-    g.add_edge('U1', 'F1', weight=5.0, relation_type='avaliou')
-    
-    # U1 avaliou F2 com nota 3.0
-    g.add_edge('U1', 'F2', weight=3.0, relation_type='avaliou')
-
-    # F1 pertence ao gênero G1
-    g.add_edge('F1', 'G1', weight=1.0, relation_type='pertence_ao_genero')
-    
-    # F2 pertence ao gênero G2
-    g.add_edge('F2', 'G2', weight=1.0, relation_type='pertence_ao_genero')
-
-    # 4. Imprimir o grafo
-    print(g)
-
-    # 5. Testar como pegar os vizinhos
-    print("\n--- Teste de Vizinhos ---")
-    usuario_teste = 'U1'
-    print(f"Vizinhos de {usuario_teste}:")
-    vizinhos_u1 = g.get_neighbors(usuario_teste)
-    print(json.dumps(vizinhos_u1, indent=2))
-
-    filme_teste = 'F1'
-    print(f"\nVizinhos de {filme_teste}:")
-    vizinhos_f1 = g.get_neighbors(filme_teste)
-    print(json.dumps(vizinhos_f1, indent=2))
+        num_users = sum(1 for n in self.nodes if n.startswith('U'))
+        num_movies = sum(1 for n in self.nodes if n.startswith('F'))
+        num_genres = sum(1 for n in self.nodes if n.startswith('G'))
+        num_edges = sum(len(edges) for edges in self.adj.values()) // 2  # Dividido por 2 porque é não-direcionado
+        
+        return (
+            f"Grafo RacoGraph:\n"
+            f"  Nós: {len(self.nodes)} total\n"
+            f"    - Usuários: {num_users}\n"
+            f"    - Filmes: {num_movies}\n"
+            f"    - Gêneros: {num_genres}\n"
+            f"  Arestas: {num_edges}\n"
+        )

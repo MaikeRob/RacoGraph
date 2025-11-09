@@ -1,148 +1,258 @@
-# recommender.py
+"""
+Sistema de recomendação baseado em Random Walk com Reinício (Personalized PageRank).
+
+Implementa caminhadas aleatórias no grafo para descobrir filmes relevantes,
+considerando a estrutura completa de conexões entre usuários, filmes e gêneros.
+"""
 from __future__ import annotations
+
+import random
 from collections import defaultdict
-from math import sqrt
-from typing import Dict, Tuple, List, Set, Any
+from typing import Dict, List, Tuple
 
-# IDs no seu projeto:
-#  - Usuário: "U<userId>"
-#  - Filme:   "F<movieId>"
-#  - Gênero:  "G<genreId>"
+from graph import is_user, is_movie
+from constants import (
+    DEFAULT_RESTART_PROB_USER,
+    DEFAULT_RESTART_PROB_SIMILAR,
+    DEFAULT_NUM_WALKS,
+    DEFAULT_WALK_LENGTH,
+    DEFAULT_MIN_USER_RATING,
+    DEFAULT_TOP_N,
+    DEFAULT_K_SIMILAR
+)
 
-def is_user(nid: str) -> bool:
-    return isinstance(nid, str) and nid.startswith("U")
 
-def is_movie(nid: str) -> bool:
-    return isinstance(nid, str) and nid.startswith("F")
+# ============ Utilitários de Acesso ao Grafo ============
 
-def _neighbors(g, node_id: str) -> List[Dict[str, Any]]:
-    """Acessa vizinhos do nó, usando get_neighbors se existir, senão g.adj."""
-    if hasattr(g, "get_neighbors"):
-        return g.get_neighbors(node_id) or []
-    return g.adj.get(node_id, [])
-
-def build_user_movie_maps(g) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]], Dict[Tuple[str, str], float]]:
+def get_user_movies(g, user_id: str) -> Dict[str, float]:
     """
-    Constrói estruturas para recomendação:
-      - users_movies[u]  = {F...}  (filmes avaliados pelo usuário u)
-      - movies_users[f]  = {U...}  (usuários que avaliaram o filme f)
-      - ratings[(u, f)]  = rating  (peso da aresta U–F; se não houver, usa 1.0)
+    Retorna os filmes avaliados por um usuário com suas notas.
+    Acessa o grafo diretamente, sem estruturas auxiliares.
+    
+    Args:
+        g: Grafo
+        user_id: ID do usuário (ex: "U1")
+    
+    Returns:
+        Dicionário {movie_id: rating}
     """
-    users_movies: Dict[str, Set[str]] = defaultdict(set)
-    movies_users: Dict[str, Set[str]] = defaultdict(set)
-    ratings: Dict[Tuple[str, str], float] = {}
+    movies_ratings = {}
+    
+    for edge in g.get_neighbors(user_id):
+        neighbor = edge.get("node")
+        if is_movie(neighbor):
+            rating = float(edge.get("weight", 1.0))
+            movies_ratings[neighbor] = rating
+    
+    return movies_ratings
 
-    for nid in g.nodes.keys():
-        if not is_user(nid):
-            continue
-        for e in _neighbors(g, nid):
-            v = e.get("node")
-            if is_movie(v):
-                users_movies[nid].add(v)
-                movies_users[v].add(nid)
-                ratings[(nid, v)] = float(e.get("weight", 1.0))
 
-    return users_movies, movies_users, ratings
+# ============ Random Walk com Reinício (Personalized PageRank) ============
 
-# ---------------- Similaridade item–item ----------------
-
-def jaccard_users(f1: str, f2: str, movies_users: Dict[str, Set[str]]) -> float:
-    """Jaccard entre dois filmes (conjuntos de usuários)."""
-    u1, u2 = movies_users.get(f1, set()), movies_users.get(f2, set())
-    if not u1 or not u2:
-        return 0.0
-    inter = len(u1 & u2)
-    if inter == 0:
-        return 0.0
-    union = len(u1 | u2)
-    return inter / union
-
-def cosine_users(f1: str, f2: str,
-                 movies_users: Dict[str, Set[str]],
-                 ratings: Dict[Tuple[str, str], float]) -> float:
+def random_walk(
+    g,
+    start_nodes: List[str],
+    num_walks: int = DEFAULT_NUM_WALKS,
+    walk_length: int = DEFAULT_WALK_LENGTH,
+    restart_prob: float = DEFAULT_RESTART_PROB_USER,
+    weights: Dict[str, float] = None
+) -> Dict[str, float]:
     """
-    Cosseno entre vetores de usuários (dimensões = usuários), ponderado pelo rating.
+    Executa Random Walk com Reinício a partir de um conjunto de nós iniciais.
+    
+    Args:
+        g: Grafo
+        start_nodes: Lista de nós iniciais (ex: filmes avaliados pelo usuário)
+        num_walks: Número de caminhadas a realizar
+        walk_length: Comprimento máximo de cada caminhada
+        restart_prob: Probabilidade de reiniciar em um nó inicial (tipicamente 0.15)
+        weights: Pesos dos nós iniciais (ex: ratings do usuário)
+    
+    Returns:
+        Dicionário com scores de visita para cada nó
     """
-    u1, u2 = movies_users.get(f1, set()), movies_users.get(f2, set())
-    common = u1 & u2
-    if not common:
-        return 0.0
+    if not start_nodes:
+        return {}
+    
+    # Inicializa pesos uniformes se não fornecidos
+    if weights is None:
+        weights = {node: 1.0 for node in start_nodes}
+    
+    # Normaliza pesos para probabilidades
+    total_weight = sum(weights.values())
+    start_probs = {node: weights[node] / total_weight for node in start_nodes}
+    
+    # Contador de visitas
+    visit_counts: Dict[str, float] = defaultdict(float)
+    
+    for _ in range(num_walks):
+        # Escolhe nó inicial baseado nos pesos
+        current = random.choices(start_nodes, weights=[start_probs[n] for n in start_nodes])[0]
+        
+        for step in range(walk_length):
+            # Registra visita
+            visit_counts[current] += 1.0
+            
+            # Decide se reinicia
+            if random.random() < restart_prob:
+                current = random.choices(start_nodes, weights=[start_probs[n] for n in start_nodes])[0]
+                continue
+            
+            # Pega vizinhos
+            neighbors = g.get_neighbors(current)
+            if not neighbors:
+                # Sem vizinhos, reinicia
+                current = random.choices(start_nodes, weights=[start_probs[n] for n in start_nodes])[0]
+                continue
+            
+            # Escolhe próximo nó ponderado pelo peso da aresta
+            next_nodes = []
+            edge_weights = []
+            
+            for edge in neighbors:
+                next_node = edge.get("node")
+                edge_weight = float(edge.get("weight", 1.0))
+                next_nodes.append(next_node)
+                edge_weights.append(edge_weight)
+            
+            # Normaliza pesos
+            total_edge_weight = sum(edge_weights)
+            if total_edge_weight > 0:
+                edge_probs = [w / total_edge_weight for w in edge_weights]
+                current = random.choices(next_nodes, weights=edge_probs)[0]
+            else:
+                current = random.choice(next_nodes)
+    
+    # Normaliza scores
+    total_visits = sum(visit_counts.values())
+    if total_visits > 0:
+        visit_counts = {node: count / total_visits for node, count in visit_counts.items()}
+    
+    return visit_counts
 
-    num = sum(ratings[(u, f1)] * ratings[(u, f2)] for u in common)
-    den1 = sqrt(sum(ratings[(u, f1)] ** 2 for u in u1))
-    den2 = sqrt(sum(ratings[(u, f2)] ** 2 for u in u2))
-    if den1 == 0 or den2 == 0:
-        return 0.0
-    return num / (den1 * den2)
-
-# ---------------- Recomendação ----------------
 
 def topk_similar_movies(
     g,
     movie_id: str,
-    k: int = 10,
-    metric: str = "jaccard",   # "jaccard" ou "cosine"
-    min_co: int = 3,           # mínimo de usuários em comum
+    k: int = DEFAULT_TOP_N,
+    metric: str = "randomwalk",
+    min_co: int = 3,
+    num_walks: int = 500,
+    walk_length: int = 8,
 ) -> List[Tuple[str, float]]:
     """
-    Retorna os K filmes mais similares a `movie_id`, considerando coavaliações (min_co).
+    Retorna os K filmes mais similares a `movie_id` usando Random Walk.
+    
+    Args:
+        g: Grafo
+        movie_id: ID do filme de referência
+        k: Número de filmes similares a retornar
+        metric: Métrica a usar ("randomwalk" é o padrão)
+        min_co: Mínimo de usuários em comum (usado para filtrar candidatos iniciais)
+        num_walks: Número de caminhadas
+        walk_length: Comprimento de cada caminhada
+    
+    Returns:
+        Lista de tuplas (movie_id, score) ordenada por score decrescente
     """
-    _, movies_users, ratings = build_user_movie_maps(g)
-    if movie_id not in movies_users:
+    if movie_id not in g.nodes:
         return []
+    
+    # Executa random walk a partir do filme
+    scores = random_walk(
+        g,
+        start_nodes=[movie_id],
+        num_walks=num_walks,
+        walk_length=walk_length,
+        restart_prob=DEFAULT_RESTART_PROB_SIMILAR
+    )
+    
+    # Filtra apenas filmes (exceto o próprio)
+    movie_scores = [
+        (node, score) 
+        for node, score in scores.items() 
+        if is_movie(node) and node != movie_id
+    ]
+    
+    # Ordena por score
+    movie_scores.sort(key=lambda x: x[1], reverse=True)
+    
+    return movie_scores[:k]
 
-    target_users = movies_users[movie_id]
-    candidates: Set[str] = set()
-    for u in target_users:
-        for e in _neighbors(g, u):
-            v = e.get("node")
-            if is_movie(v) and v != movie_id:
-                candidates.add(v)
-
-    sims: List[Tuple[str, float]] = []
-    for f2 in candidates:
-        co = len(movies_users[movie_id] & movies_users[f2])
-        if co < min_co:
-            continue
-
-        if metric == "cosine":
-            s = cosine_users(movie_id, f2, movies_users, ratings)
-        else:
-            s = jaccard_users(movie_id, f2, movies_users)
-        if s > 0:
-            sims.append((f2, s))
-
-    sims.sort(key=lambda x: x[1], reverse=True)
-    return sims[:k]
 
 def recommend_for_user(
     g,
     user_id: str,
-    k_similar: int = 20,
-    topn: int = 10,
-    metric: str = "jaccard",
+    k_similar: int = DEFAULT_K_SIMILAR,
+    topn: int = DEFAULT_TOP_N,
+    metric: str = "randomwalk",
     min_co: int = 3,
-    min_user_rating: float = 3.5,
+    min_user_rating: float = DEFAULT_MIN_USER_RATING,
+    num_walks: int = 2000,
+    walk_length: int = 10,
 ) -> List[Tuple[str, float]]:
     """
-    Top-N para o usuário:
-      score(candidato) = soma( sim(f, candidato) * rating(u, f) ) para f vistos por u com rating >= min_user_rating
+    Gera recomendações para um usuário usando Random Walk com Reinício.
+    
+    O algoritmo:
+    1. Identifica filmes avaliados pelo usuário (com nota >= min_user_rating)
+    2. Executa random walks a partir desses filmes, ponderados pelas notas
+    3. Conta visitas em nós do grafo (usuários, filmes, gêneros)
+    4. Filtra apenas filmes não vistos
+    5. Retorna top-N com maiores scores
+    
+    Args:
+        g: Grafo
+        user_id: ID do usuário
+        k_similar: (não usado no random walk, mantido para compatibilidade)
+        topn: Número de recomendações a retornar
+        metric: Métrica a usar ("randomwalk" é o padrão)
+        min_co: (não usado no random walk, mantido para compatibilidade)
+        min_user_rating: Nota mínima para considerar um filme como preferido
+        num_walks: Número de caminhadas aleatórias
+        walk_length: Comprimento de cada caminhada
+    
+    Returns:
+        Lista de tuplas (movie_id, score) ordenada por score decrescente
     """
-    users_movies, _, ratings = build_user_movie_maps(g)
-    seen = users_movies.get(user_id, set())
-    if not seen:
+    # Obtém filmes avaliados pelo usuário diretamente do grafo
+    user_movies = get_user_movies(g, user_id)
+    
+    if not user_movies:
         return []
-
-    cand_scores: Dict[str, float] = defaultdict(float)
-    for f in seen:
-        sims = topk_similar_movies(g, f, k=k_similar, metric=metric, min_co=min_co)
-        r_uf = ratings.get((user_id, f), 0.0)
-        if r_uf < min_user_rating:
-            continue
-        for c_id, s in sims:
-            if c_id in seen:
-                continue
-            cand_scores[c_id] += s * r_uf
-
-    ranked = sorted(cand_scores.items(), key=lambda x: x[1], reverse=True)
-    return ranked[:topn]
+    
+    # Filtra filmes bem avaliados pelo usuário
+    start_movies = []
+    movie_weights = {}
+    
+    for movie, rating in user_movies.items():
+        if rating >= min_user_rating:
+            start_movies.append(movie)
+            movie_weights[movie] = rating
+    
+    if not start_movies:
+        # Se nenhum filme passa o threshold, usa todos
+        start_movies = list(user_movies.keys())
+        movie_weights = user_movies.copy()
+    
+    # Executa random walk a partir dos filmes do usuário
+    scores = random_walk(
+        g,
+        start_nodes=start_movies,
+        num_walks=num_walks,
+        walk_length=walk_length,
+        restart_prob=DEFAULT_RESTART_PROB_USER,
+        weights=movie_weights
+    )
+    
+    # Filtra apenas filmes não vistos
+    recommendations = [
+        (node, score)
+        for node, score in scores.items()
+        if is_movie(node) and node not in user_movies
+    ]
+    
+    # Ordena por score
+    recommendations.sort(key=lambda x: x[1], reverse=True)
+    
+    return recommendations[:topn]

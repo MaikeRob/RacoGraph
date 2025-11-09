@@ -57,31 +57,38 @@ pip install -e .
 
 ## Como Rodar
 
-**Usando uv:**
+**Interface Web (Streamlit):**
+
 ```bash
-uv run python main.py
+# Usando uv (recomendado)
+uv run streamlit run app.py
+
+# Ou com pip (após ativar o ambiente virtual)
+streamlit run app.py
 ```
 
-**Usando pip (após ativar o ambiente virtual):**
+**Avaliação do Sistema:**
 
-*Linux/macOS:*
 ```bash
-source .venv/bin/activate
-python main.py
-```
+# Usando uv (recomendado)
+uv run python eval.py --k 10 --split last
 
-*Windows:*
-```bash
-.venv\Scripts\activate
-python main.py
+# Ou com pip (após ativar o ambiente virtual)
+python eval.py --k 10 --split last
 ```
 
 ## Estrutura do Projeto
 
-- [`main.py`](main.py) - Arquivo principal da aplicação
-- [`graph.py`](graph.py) - Implementação do grafo de recomendações
-- [`data/ml-latest-small/`](data/ml-latest-small/) - Dataset do MovieLens
-- [`pyproject.toml`](pyproject.toml) - Configuração do projeto e dependências
+### 📁 Arquivos Principais
+
+- **[`app.py`](app.py)** - Interface web interativa (Streamlit)
+- **[`eval.py`](eval.py)** - Sistema de avaliação e métricas
+- **[`recommender.py`](recommender.py)** - Algoritmo Random Walk com Reinício
+- **[`graph.py`](graph.py)** - Estrutura de dados do grafo
+- **[`data_loader.py`](data_loader.py)** - Carregamento de dados do MovieLens
+- **[`constants.py`](constants.py)** - Constantes e configurações
+- **[`data/ml-latest-small/`](data/ml-latest-small/)** - Dataset do MovieLens
+- **[`pyproject.toml`](pyproject.toml)** - Configuração do projeto e dependências
 
 ## Dataset
 
