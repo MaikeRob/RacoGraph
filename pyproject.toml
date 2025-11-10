@@ -14,4 +14,5 @@ dependencies = [
     "matplotlib>=3.5.0",
     "networkx>=2.8.0",
     "streamlit>=1.28.0",
+    "pyvis>=0.3.0",
 ]

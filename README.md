@@ -1,99 +1,90 @@
 # RacoGraph
 
-Sistema de recomendação de filmes baseado em grafos usando dados do MovieLens.
+Sistema de recomendação de filmes baseado em grafos usando Random Walk com Reinício (Personalized PageRank).
 
-## Pré-requisitos
+## Requisitos
 
 - Python 3.12+
-- uv (gerenciador de pacotes Python)
+- uv (recomendado) ou pip
 
-## Instalação
+## Instalação Rápida
 
-1. Instale o uv (se ainda não tiver):
-
-**Linux/macOS:**
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-**Windows:**
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Ou instale via pip:
-```bash
-pip install uv
-```
-
-2. Clone o repositório:
-```bash
+# Clone o repositório
 git clone https://github.com/MaikeRob/RacoGraph.git
 cd RacoGraph
-```
 
-3. Instale as dependências:
-
-**Usando uv (recomendado):**
-```bash
+# Instale as dependências
 uv sync
 ```
 
-**Usando pip (alternativa):**
+<details>
+<summary>Instalação alternativa com pip</summary>
 
-*Linux/macOS:*
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Linux/macOS
+# ou: .venv\Scripts\activate  # Windows
 pip install -e .
 ```
+</details>
 
-*Windows:*
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-```
+## Como Usar
 
-## Como Rodar
-
-**Interface Web (Streamlit):**
+### Interface Web
 
 ```bash
-# Usando uv (recomendado)
 uv run streamlit run app.py
-
-# Ou com pip (após ativar o ambiente virtual)
-streamlit run app.py
 ```
 
-**Avaliação do Sistema:**
+Acesse `http://localhost:8501` no navegador para:
+- Encontrar filmes similares
+- Gerar recomendações personalizadas
+- Visualizar grafos interativos
+
+### Avaliação do Sistema
 
 ```bash
-# Usando uv (recomendado)
-uv run python eval.py --k 10 --split last
+# Avaliação básica
+uv run python eval.py
 
-# Ou com pip (após ativar o ambiente virtual)
-python eval.py --k 10 --split last
+# Avaliação customizada
+uv run python eval.py --k 10 --num-walks 3000 --walk-length 25 --split random
 ```
 
-## Estrutura do Projeto
+**Parâmetros disponíveis:**
+- `--k`: Número de recomendações (padrão: 10)
+- `--num-walks`: Quantidade de caminhadas (padrão: 1000)
+- `--walk-length`: Tamanho de cada caminhada (padrão: 10)
+- `--min-user-rating`: Nota mínima para preferência (padrão: 3.0)
+- `--split`: Modo de divisão treino/teste (`last` ou `random`)
 
-### 📁 Arquivos Principais
+## Estrutura
 
-- **[`app.py`](app.py)** - Interface web interativa (Streamlit)
-- **[`eval.py`](eval.py)** - Sistema de avaliação e métricas
-- **[`recommender.py`](recommender.py)** - Algoritmo Random Walk com Reinício
-- **[`graph.py`](graph.py)** - Estrutura de dados do grafo
-- **[`data_loader.py`](data_loader.py)** - Carregamento de dados do MovieLens
-- **[`constants.py`](constants.py)** - Constantes e configurações
-- **[`data/ml-latest-small/`](data/ml-latest-small/)** - Dataset do MovieLens
-- **[`pyproject.toml`](pyproject.toml)** - Configuração do projeto e dependências
+```
+RacoGraph/
+├── app.py              # Interface Streamlit
+├── eval.py             # Avaliação e métricas
+├── recommender.py      # Algoritmo Random Walk
+├── graph.py            # Estrutura de grafo
+├── data_loader.py      # Carregamento de dados
+├── visualizer.py       # Visualização interativa
+├── constants.py        # Configurações
+└── data/
+    └── ml-latest-small/  # Dataset MovieLens
+```
+
+## Algoritmo
+
+Utiliza **Random Walk com Reinício** para navegar pelo grafo de:
+- Usuários → Filmes (avaliações)
+- Filmes → Gêneros (classificações)
+
+As recomendações são geradas através de caminhadas aleatórias ponderadas pelas avaliações dos usuários.
 
 ## Dataset
 
-O projeto utiliza o dataset MovieLens Small, que contém:
-- Avaliações de filmes
-- Tags de filmes
-- Informações de filmes
-- Links para IMDb e TMDb
+**MovieLens Small** (~100k avaliações):
+- 610 usuários
+- 9.742 filmes
+- Avaliações, tags e metadados

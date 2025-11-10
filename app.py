@@ -1,10 +1,4 @@
-"""
-Interface web interativa do RacoGraph usando Streamlit.
-
-Permite explorar o sistema de recomendação através de dois modos:
-1. Encontrar filmes similares a um filme específico
-2. Gerar recomendações personalizadas para um usuário
-"""
+"""Interface web interativa do RacoGraph usando Streamlit."""
 from __future__ import annotations
 
 import pandas as pd
@@ -12,9 +6,10 @@ import streamlit as st
 
 from data_loader import build_graph
 from recommender import topk_similar_movies, recommend_for_user, get_user_movies
-from constants import NODE_PREFIX_USER, NODE_PREFIX_MOVIE
+from constants import NODE_PREFIX_USER, NODE_PREFIX_MOVIE, DEFAULT_RESTART_PROB_USER
+from visualizer import visualize_recommendations
+import os
 
-# ========= CACHE =========
 @st.cache_data(show_spinner=True)
 def load_data():
     g, movies_df, ratings_df = build_graph()
@@ -26,29 +21,14 @@ def build_title_maps(movies_df: pd.DataFrame):
     title_to_id = {v: k for k, v in id_to_title.items()}
     return id_to_title, title_to_id
 
-def get_title(g, movies_df: pd.DataFrame, movie_node_id: str) -> str:
-    """
-    Obtém o título de um filme de forma segura.
-    
-    Tenta primeiro pelo DataFrame (mais rápido), depois pelo grafo, e por
-    último retorna o próprio ID se nada funcionar.
-    
-    Args:
-        g: Grafo contendo os nós
-        movies_df: DataFrame com dados dos filmes
-        movie_node_id: ID do nó do filme (formato "F123")
-    
-    Returns:
-        Título do filme ou ID se não encontrado
-    """
+def get_title(movies_df: pd.DataFrame, movie_node_id: str) -> str:
+    """Obtém o título de um filme. Retorna o ID se não encontrado."""
     try:
         mid = int(movie_node_id[1:])
         return movies_df.loc[movies_df["movieId"] == mid, "title"].iloc[0]
-    except Exception:
-        node = g.get_node(movie_node_id)
-        return (node.get("title") if node else None) or movie_node_id
+    except (ValueError, IndexError, KeyError):
+        return movie_node_id
 
-# ========= UI =========
 st.set_page_config(page_title="RacoGraph – Recomendador por Grafos", layout="wide")
 st.title("RacoGraph - Recomendacao por Grafos (MovieLens Small)")
 
@@ -59,7 +39,6 @@ with st.spinner("Carregando grafo e dados..."):
 st.sidebar.header("Parametros")
 mode = st.sidebar.radio("Modo", ["Recomendar para usuário", "Filmes similares"])
 
-# ==== FILTRO DE GÊNERO ====
 all_genres = sorted(
     {g for gs in movies_df["genres"] for g in str(gs).split("|") if g and g != "(no genres listed)"}
 )
@@ -119,14 +98,14 @@ with colR:
 
         if run:
             sims = topk_similar_movies(
-                g, mid_node, k=topk, metric="randomwalk", 
+                g, mid_node, k=topk,
                 num_walks=num_walks, walk_length=walk_length
             )
             if not sims:
                 st.warning("Nenhum similar encontrado com os parâmetros atuais.")
             else:
                 df = pd.DataFrame(
-                    [{"movieId": m, "title": get_title(g, movies_df, m), "similarity": s} for m, s in sims]
+                    [{"movieId": m, "title": get_title(movies_df, m), "similarity": s} for m, s in sims]
                 )
                 st.write(f"**Top {len(df)} similares a:** `{mid_node}` — *{title}*")
                 st.dataframe(df, use_container_width=True)
@@ -137,20 +116,24 @@ with colR:
         uid_node = f"{NODE_PREFIX_USER}{int(user_id)}"
         run = st.button("Recomendar")
 
+        # Inicializa session state
+        if 'recommendations_data' not in st.session_state:
+            st.session_state.recommendations_data = None
+
         if run:
             # Mostra filmes que o usuário gostou (usados para caminhada)
             user_movies = get_user_movies(g, uid_node)
-            liked_movies = {mid: rating for mid, rating in user_movies.items() 
+            liked_movies = {mid: rating for mid, rating in user_movies.items()
                           if rating >= min_user_rating}
-            
+
             if liked_movies:
                 st.subheader(f"Filmes que o usuario {user_id} gostou (nota >= {min_user_rating})")
                 st.caption(f"Estes {len(liked_movies)} filmes serao usados como ponto de partida para o Random Walk")
-                
+
                 liked_df = pd.DataFrame([
                     {
                         "movieId": mid,
-                        "title": get_title(g, movies_df, mid),
+                        "title": get_title(movies_df, mid),
                         "rating": rating
                     }
                     for mid, rating in sorted(liked_movies.items(), key=lambda x: x[1], reverse=True)
@@ -159,13 +142,12 @@ with colR:
                 st.divider()
             else:
                 st.warning(f"Usuario {user_id} nao tem filmes avaliados com nota >= {min_user_rating}")
-            
+
             # Gera recomendações
             st.subheader("Recomendacoes Personalizadas")
             recs = recommend_for_user(
                 g, uid_node,
-                k_similar=30, topn=topk,
-                metric="randomwalk", min_user_rating=min_user_rating,
+                topn=topk, min_user_rating=min_user_rating,
                 num_walks=num_walks, walk_length=walk_length
             )
 
@@ -175,6 +157,17 @@ with colR:
                     movies_df[movies_df["genres"].str.contains(selected_genre, case=False, na=False)]["movieId"].tolist()
                 )
                 recs = [(mid, score) for mid, score in recs if int(mid[1:]) in allowed_ids]
+
+            # Salva dados no session state
+            st.session_state.recommendations_data = {
+                'user_id': user_id,
+                'uid_node': uid_node,
+                'liked_movies': liked_movies,
+                'recs': recs,
+                'num_walks': num_walks,
+                'walk_length': walk_length,
+                'selected_genre': selected_genre
+            }
 
             if not recs:
                 st.warning("Sem recomendações por similaridade. Mostrando populares como fallback.")
@@ -192,12 +185,12 @@ with colR:
                     popular_ids = ratings_df["movieId"].value_counts().head(topk).index.tolist()
 
                 df = pd.DataFrame(
-                    [{"movieId": f"{NODE_PREFIX_MOVIE}{int(x)}", "title": get_title(g, movies_df, f"{NODE_PREFIX_MOVIE}{int(x)}"), "score": None}
+                    [{"movieId": f"{NODE_PREFIX_MOVIE}{int(x)}", "title": get_title(movies_df, f"{NODE_PREFIX_MOVIE}{int(x)}"), "score": None}
                      for x in popular_ids]
                 )
             else:
                 df = pd.DataFrame(
-                    [{"movieId": m, "title": get_title(g, movies_df, m), "score": s} for m, s in recs]
+                    [{"movieId": m, "title": get_title(movies_df, m), "score": s} for m, s in recs]
                 )
 
             st.write(f"**Recomendacoes para:** `{uid_node}`"
@@ -205,3 +198,64 @@ with colR:
             st.dataframe(df, use_container_width=True)
             if "score" in df and df["score"].notna().any():
                 st.bar_chart(df.set_index("title")["score"])
+
+        # Exibe seção de visualização se há dados salvos
+        if st.session_state.recommendations_data is not None:
+            saved_data = st.session_state.recommendations_data
+
+            if saved_data['recs'] and saved_data['liked_movies']:
+                st.divider()
+                st.subheader("Visualização Interativa")
+                st.caption("Visualize os caminhos das caminhadas aleatórias e os filmes mais visitados")
+
+                viz_button = st.button("Gerar Visualização do Grafo", type="primary")
+
+                if viz_button:
+                    with st.spinner("Gerando visualização interativa..."):
+                        # Prepara dados para visualização
+                        start_movies = [mid for mid, rating in saved_data['liked_movies'].items()]
+                        movie_weights = dict(saved_data['liked_movies'])
+
+                        # Gera visualização
+                        viz_file = f"viz_user_{saved_data['user_id']}.html"
+                        viz_path = visualize_recommendations(
+                            g, saved_data['uid_node'], start_movies, movie_weights, saved_data['recs'],
+                            saved_data['num_walks'], saved_data['walk_length'], DEFAULT_RESTART_PROB_USER,
+                            movies_df, viz_file
+                        )
+
+                        if viz_path and os.path.exists(viz_path):
+                            st.success("Visualização gerada com sucesso!")
+
+                            # Link para abrir o arquivo
+                            abs_path = os.path.abspath(viz_path)
+                            file_url = f"file://{abs_path}"
+
+                            st.markdown(f"""
+                            ### Visualização Pronta!
+
+                            **Arquivo:** `{viz_file}`
+
+                            **Como visualizar:**
+                            1. Copie o caminho abaixo
+                            2. Cole no seu navegador (Chrome, Firefox, etc.)
+
+                            ```
+                            {file_url}
+                            ```
+
+                            **Legenda da visualização:**
+                            - **Vermelho**: Você (usuário)
+                            - **Verde**: Filmes recomendados
+                            - **Azul**: Filmes que você avaliou
+                            - **Laranja**: Filmes muito visitados nas caminhadas
+                            - **Amarelo**: Gêneros
+                            - **Linhas vermelhas**: Caminhos percorridos pelas caminhadas
+
+                            *Você pode arrastar os nós, dar zoom e passar o mouse para ver detalhes!*
+                            """)
+
+                            # Botão para abrir no navegador (funciona em alguns ambientes)
+                            st.link_button("Abrir no Navegador", file_url)
+                        else:
+                            st.error("Erro ao gerar visualização. Verifique se pyvis está instalado.")

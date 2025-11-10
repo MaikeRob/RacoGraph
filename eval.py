@@ -1,16 +1,8 @@
 """
-Módulo de avaliação do sistema de recomendação RacoGraph.
+Avaliação offline do sistema de recomendação RacoGraph.
 
-Implementa avaliação offline usando split treino/teste e métricas padrão:
-- Precision@K: Proporção de recomendações relevantes
-- Recall@K: Proporção de itens relevantes encontrados
-- MAP@K: Mean Average Precision (qualidade do ranking)
-- NDCG@K: Normalized Discounted Cumulative Gain
-- HitRate@K: % de usuários com pelo menos 1 hit
-- Coverage: Diversidade do catálogo recomendado
-
-Uso:
-    python eval.py --k 10 --num-walks 1000 --split last
+Métricas: Precision@K, Recall@K, MAP@K, NDCG@K, HitRate@K, Coverage.
+Uso: python eval.py --k 10 --num-walks 1000 --split last
 """
 from __future__ import annotations
 
@@ -25,8 +17,6 @@ from graph import Graph
 from recommender import recommend_for_user
 from data_loader import build_graph
 from constants import DATA_DIR
-
-# -------------------- Split de treino/teste --------------------
 
 def split_per_user(ratings: pd.DataFrame, mode: str = "last", holdout: int = 1, test_frac: float = 0.2, seed: int = 42):
     """
@@ -46,7 +36,7 @@ def split_per_user(ratings: pd.DataFrame, mode: str = "last", holdout: int = 1, 
     train_parts = []
     test_parts = []
 
-    for uid, grp in ratings.groupby("userId"):
+    for _, grp in ratings.groupby("userId"):
         n = len(grp)
         if n <= 1:
             # sem material para split, joga tudo em treino
@@ -76,8 +66,6 @@ def split_per_user(ratings: pd.DataFrame, mode: str = "last", holdout: int = 1, 
     return train_df, test_df
 
 
-
-# -------------------- Métricas @K --------------------
 
 def precision_at_k(recommended: list[str], relevant: set[str], k: int) -> float:
     if k == 0: return 0.0
@@ -116,8 +104,6 @@ def ndcg_at_k(recommended: list[str], relevant: set[str], k: int) -> float:
         return 0.0
     return dcg(recommended) / ideal
 
-# -------------------- Avaliação --------------------
-
 def evaluate(g: Graph,
              movies_df: pd.DataFrame,
              train_df: pd.DataFrame,
@@ -128,7 +114,7 @@ def evaluate(g: Graph,
              min_user_rating: float = 3.0) -> Dict:
     """
     Avalia o sistema de recomendação usando Random Walk.
-    
+
     Args:
         g: Grafo construído com dados de TREINO apenas
         movies_df: DataFrame com informações dos filmes
@@ -138,7 +124,7 @@ def evaluate(g: Graph,
         num_walks: Número de caminhadas aleatórias
         walk_length: Comprimento de cada caminhada
         min_user_rating: Nota mínima para considerar preferência
-    
+
     Returns:
         Dicionário com métricas de avaliação
     """
@@ -149,15 +135,15 @@ def evaluate(g: Graph,
     evaluated_users = 0
     users_with_recs = 0
 
-    print(f"\n🔄 Avaliando {len(users)} usuários...")
-    print(f"📊 Parâmetros: k={k}, num_walks={num_walks}, walk_length={walk_length}, min_rating={min_user_rating}")
-    
+    print(f"\nAvaliando {len(users)} usuários...")
+    print(f"Parâmetros: k={k}, num_walks={num_walks}, walk_length={walk_length}, min_rating={min_user_rating}")
+
     for i, uid_int in enumerate(users, 1):
         if i % 50 == 0:
             print(f"   Progresso: {i}/{len(users)} usuários avaliados...")
-        
+
         uid = f"U{uid_int}"
-        
+
         # Filmes relevantes = filmes no TESTE do usuário
         rel_movies = set(f"F{int(m)}" for m in test_df.loc[test_df["userId"] == uid_int, "movieId"].tolist())
         if not rel_movies:
@@ -166,9 +152,7 @@ def evaluate(g: Graph,
         # Gera recomendações usando APENAS dados de TREINO
         recs_user = recommend_for_user(
             g, uid,
-            k_similar=30, 
-            topn=k, 
-            metric="randomwalk",
+            topn=k,
             min_user_rating=min_user_rating,
             num_walks=num_walks,
             walk_length=walk_length
@@ -194,7 +178,7 @@ def evaluate(g: Graph,
         evaluated_users += 1
 
     total_movies = movies_df["movieId"].nunique()
-    
+
     results = {
         "users_evaluated": evaluated_users,
         "users_with_recs": users_with_recs,
@@ -208,72 +192,52 @@ def evaluate(g: Graph,
     }
     return results
 
-# -------------------- CLI --------------------
-
 def print_results(results: Dict, config: Dict):
     """Imprime resultados da avaliação de forma formatada."""
     print("\n" + "="*60)
     print("  RESULTADOS DA AVALIACAO - RacoGraph (Random Walk)")
     print("="*60)
-    
-    print("\n📋 Configuração:")
+
+    print("\nConfiguração:")
     for key, value in config.items():
         print(f"   {key:<20}: {value}")
-    
-    print("\n📊 Métricas de Qualidade:")
-    
-    # Separa métricas por tipo
-    basic_metrics = ["users_evaluated", "users_with_recs", "unique_movies_recommended"]
-    quality_metrics = [k for k in results.keys() if "@" in k]
-    other_metrics = [k for k in results.keys() if k not in basic_metrics and "@" not in k]
-    
-    print("\n   Estatísticas Básicas:")
-    for key in basic_metrics:
-        if key in results:
-            print(f"   {key:<30}: {results[key]}")
-    
-    print("\n   Métricas de Ranking:")
-    for key in quality_metrics:
-        value = results[key]
-        print(f"   {key:<30}: {value:.4f}")
-    
-    print("\n   Outras Métricas:")
-    for key in other_metrics:
-        value = results[key]
+
+    print("\nMétricas:")
+    for key, value in results.items():
         if isinstance(value, float):
             print(f"   {key:<30}: {value:.4f}")
         else:
             print(f"   {key:<30}: {value}")
-    
+
     print("\n" + "="*60)
-    
+
     # Interpretação
-    print("\n💡 Interpretação:")
+    print("\nInterpretação:")
     map_val = results.get("MAP@10", 0)
     hitrate = results.get("HitRate@10", 0)
     coverage = results.get("Coverage", 0)
-    
+
     if map_val > 0.15:
-        print("   ✅ MAP: Excelente - modelo ranqueia bem itens relevantes")
+        print("   [OK] MAP: Excelente - modelo ranqueia bem itens relevantes")
     elif map_val > 0.10:
-        print("   ⚠️  MAP: Bom - há espaço para melhorias no ranking")
+        print("   [AVISO] MAP: Bom - há espaço para melhorias no ranking")
     else:
-        print("   ❌ MAP: Baixo - considere ajustar parâmetros")
-    
+        print("   [BAIXO] MAP: Baixo - considere ajustar parâmetros")
+
     if hitrate > 0.70:
-        print("   ✅ HitRate: Excelente - maioria dos usuários recebe recomendações úteis")
+        print("   [OK] HitRate: Excelente - maioria dos usuários recebe recomendações úteis")
     elif hitrate > 0.50:
-        print("   ⚠️  HitRate: Moderado - muitos usuários sem hits")
+        print("   [AVISO] HitRate: Moderado - muitos usuários sem hits")
     else:
-        print("   ❌ HitRate: Baixo - poucas recomendações relevantes")
-    
+        print("   [BAIXO] HitRate: Baixo - poucas recomendações relevantes")
+
     if coverage > 0.20:
-        print("   ✅ Coverage: Boa diversidade no catálogo")
+        print("   [OK] Coverage: Boa diversidade no catálogo")
     elif coverage > 0.10:
-        print("   ⚠️  Coverage: Moderada - sistema um pouco enviesado")
+        print("   [AVISO] Coverage: Moderada - sistema um pouco enviesado")
     else:
-        print("   ❌ Coverage: Baixa - muito focado em poucos filmes")
-    
+        print("   [BAIXO] Coverage: Baixa - muito focado em poucos filmes")
+
     print("\n")
 
 
@@ -286,31 +250,31 @@ Exemplos de uso:
 
   # Avaliação básica (padrão)
   python eval.py
-  
+
   # Avaliar top-20 com mais caminhadas
   python eval.py --k 20 --num-walks 5000
-  
+
   # Split aleatório com 20% no teste
   python eval.py --split random --test-frac 0.2
-  
+
   # Apenas filmes com nota >= 4.0
   python eval.py --min-user-rating 4.0
-  
+
   # Avaliação completa otimizada
   python eval.py --k 10 --num-walks 2000 --walk-length 15 --min-user-rating 3.5
         """
     )
-    
+
     # Parâmetros de avaliação
-    parser.add_argument("--k", type=int, default=10, 
+    parser.add_argument("--k", type=int, default=10,
                        help="Top-K para métricas (default: 10)")
-    
+
     # Parâmetros do Random Walk
     parser.add_argument("--num-walks", type=int, default=1000,
                        help="Numero de caminhadas aleatorias (default: 1000)")
     parser.add_argument("--walk-length", type=int, default=10,
                        help="Comprimento de cada caminhada (default: 10)")
-    
+
     # Parâmetros de split
     parser.add_argument("--split", choices=["last", "random"], default="last",
                        help="Modo de split treino/teste (default: last)")
@@ -318,56 +282,54 @@ Exemplos de uso:
                        help="Se split=last, numero de itens no teste por usuario (default: 1)")
     parser.add_argument("--test-frac", type=float, default=0.2,
                        help="Se split=random, fracao no teste (default: 0.2)")
-    
+
     # Parâmetros do modelo
     parser.add_argument("--min-user-rating", type=float, default=3.0,
                        help="Nota minima para considerar preferencia (default: 3.0)")
-    
+
     args = parser.parse_args()
 
     print("\n" + "="*60)
     print("  RacoGraph - Avaliacao de Sistema de Recomendacao")
     print("="*60)
-    
+
     # Carrega dados
-    print("\n📂 Carregando dados do MovieLens Small...")
+    print("\nCarregando dados do MovieLens Small...")
     movies = pd.read_csv(DATA_DIR / "movies.csv", dtype={"movieId": int})
-    ratings = pd.read_csv(DATA_DIR / "ratings.csv", 
+    ratings = pd.read_csv(DATA_DIR / "ratings.csv",
                          dtype={"userId": int, "movieId": int, "rating": float, "timestamp": int})
-    
-    print(f"   ✓ {len(movies)} filmes")
-    print(f"   ✓ {len(ratings)} avaliacoes")
-    print(f"   ✓ {ratings['userId'].nunique()} usuarios")
+
+    print(f"   * {len(movies)} filmes")
+    print(f"   * {len(ratings)} avaliacoes")
+    print(f"   * {ratings['userId'].nunique()} usuarios")
 
     # Split treino/teste
-    print(f"\n🔀 Dividindo dados (modo: {args.split})...")
+    print(f"\nDividindo dados (modo: {args.split})...")
     train_df, test_df = split_per_user(
         ratings, mode=args.split, holdout=args.holdout, test_frac=args.test_frac
     )
-    print(f"   ✓ Treino: {len(train_df)} avaliacoes")
-    print(f"   ✓ Teste: {len(test_df)} avaliacoes")
+    print(f"   * Treino: {len(train_df)} avaliacoes")
+    print(f"   * Teste: {len(test_df)} avaliacoes")
 
     # Constrói grafo com APENAS treino
-    print("\n🔨 Construindo grafo com dados de TREINO...")
+    print("\nConstruindo grafo com dados de TREINO...")
     g, _, _ = build_graph(movies, train_df)
-    print(f"   ✓ Grafo construido com sucesso")
-    print(f"   ✓ {len(g.nodes)} nos no grafo")
-
-    # Configuração da avaliação
+    print("   * Grafo construido com sucesso")
+    print(f"   * {len(g.nodes)} nos no grafo")    # Configuração da avaliação
     config = {
         "Top-K": args.k,
         "Num Walks": args.num_walks,
         "Walk Length": args.walk_length,
         "Min User Rating": args.min_user_rating,
         "Split Mode": args.split,
-        "Holdout" if args.split == "last" else "Test Frac": 
+        "Holdout" if args.split == "last" else "Test Frac":
             args.holdout if args.split == "last" else args.test_frac
     }
 
     # Avaliação
     results = evaluate(
         g, movies, train_df, test_df,
-        k=args.k, 
+        k=args.k,
         num_walks=args.num_walks,
         walk_length=args.walk_length,
         min_user_rating=args.min_user_rating
